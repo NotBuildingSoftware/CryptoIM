@@ -1,0 +1,462 @@
+package main;
+
+import java.net.*;
+import java.io.*;
+import java.security.KeyFactory;
+import java.security.KeyPair;
+import java.security.KeyPairGenerator;
+import java.security.PublicKey;
+import java.security.spec.X509EncodedKeySpec;
+import java.util.*;
+
+import javax.swing.DefaultListModel;
+import javax.swing.JFrame;
+import javax.swing.JList;
+import javax.swing.JScrollPane;
+import javax.swing.JTextArea;
+import javax.swing.ListSelectionModel;
+import javax.swing.event.ListSelectionEvent;
+import javax.swing.event.ListSelectionListener;
+
+import Decoder.BASE64Decoder;
+import Decoder.BASE64Encoder;
+
+public class Chat extends JFrame {
+ 
+	String serverIP = "localhost";
+    int Port = 5000;
+    Socket sock;
+    Boolean isConnected = false;
+    
+    private DefaultListModel<String> listModel = new DefaultListModel<String>();
+    private ArrayList<User> userList = new ArrayList<User>();
+    private JTextArea input;
+    private JTextArea output;
+    private Account acc;
+    private User partner;
+    private BufferedReader reader;
+    private PrintWriter writer;
+    
+    
+    public Chat() {
+        initComponents();
+    }
+    
+    public String parse(String in){    	
+    	String out = in.replaceAll("\n", "<NEWLINE>")
+   			 		   .replaceAll("\r", "<SLASHR>")
+   			 		   .replaceAll(":", "<COLLON>")
+   			 		   ;
+    	return out;
+    }
+    
+    public String reParse(String in){    
+    	String out = in.replaceAll("<NEWLINE>", "\n")
+    				   .replaceAll("<SLASHR>", "\r")
+    				   .replaceAll("COLLON", ":")
+    				   ;
+    	return out;
+    }
+    
+    public void sendMsg(String msg){
+    	//SEND MSG : msg : sender : reciever
+    	if(partner!=null){
+    		
+    		try {
+    			String cryptoText = msg;
+    			cryptoText = new EasyCrypt(partner.getPublicKey(), "RSA").encrypt(msg);			//<---
+    	//		cryptoText = new EasyCrypt(acc.getPrivateKey(), "RSA").encrypt(cryptoText);
+				
+				writer.println("SEND MSG:"+parse(cryptoText)+":"+acc.getName()+":"+partner.getName());
+	        	writer.flush();
+	        	addMsg(msg, acc.getName());
+			} catch (Exception e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+    		
+			
+    		
+    	}
+    	else displayMsg("You have to choose a chat-partner", "SYSTEM");
+    }
+    
+    public void displayMsg(String msg, String sender){
+    	output.append("("+sender+") "+msg+"\n");
+    	output.setCaretPosition(output.getDocument().getLength());
+    }
+    
+    public void changePartner(String partner){
+    	for (Iterator<User> it = userList.iterator(); it.hasNext();) { 
+            User user = it.next(); 
+            if(user.getName().equals(partner))this.partner = user; 
+        }
+    	output.setText("");
+    	ArrayList<String> chat = this.partner.getChat();
+    	
+    	for (Iterator<String> it = this.partner.getChat().iterator(); it.hasNext();) { 
+            String[] msg = it.next().split("<SEPERATOR>");
+    		displayMsg(msg[1], msg[0]); 
+        }
+    }
+    
+    public void connect(){
+    	if (isConnected == false && usernameField.getText().equals("")==false) {
+            usernameField.setEditable(false);
+            
+            acc = new Account(usernameField.getText());
+            
+            //publicKey in String konvertieren
+            byte[] array = acc.getPublicKey().getEncoded();
+            
+            BASE64Encoder encoder = new BASE64Encoder();
+            String stringPublicKey = encoder.encode(array);
+            
+
+
+            try {
+                sock = new Socket(serverIP, Port);
+                InputStreamReader streamreader = new InputStreamReader(sock.getInputStream());
+                reader = new BufferedReader(streamreader);
+                writer = new PrintWriter(sock.getOutputStream());
+                writer.println("REGISTER:"+acc.getName()+":"+parse(stringPublicKey));
+                writer.flush(); // flushes the buffer
+                isConnected = true; // Used to see if the client is connected.
+                System.out.println("Connected to \""+serverIP+"\"");
+                displayMsg("You are connected", "SYSTEM");
+            } catch (Exception ex) {
+            	displayMsg("You could not connect", "SYSTEM");
+                usernameField.setEditable(true);
+                acc = null;
+            }
+            ListenThread();
+        } else if (isConnected == true) {
+        	displayMsg("You are already connected", "SYSTEM");
+        }
+    }
+    
+    public void ListenThread() {
+        Thread IncomingReader = new Thread(new IncomingReader());
+        IncomingReader.start();
+   }
+    
+    public void disconnect(){
+    	if(acc!=null){
+    		try {
+        		writer.println("DISCONNECT:"+acc.getName());
+        		writer.flush();
+    			output.setText("");
+    			acc = null;
+    			listModel.clear();
+    			partner = null;
+    			isConnected = false;
+    			displayMsg("You are disconnected", "SYSTEM");
+    			usernameField.setEditable(true);
+    			sock.close();
+    		} catch (IOException e) {
+    			// TODO Auto-generated catch block
+    			e.printStackTrace();
+    		}
+    	}
+    	else displayMsg("You are not connected", "SYSTEM");
+    	
+    }
+    
+    public void addUser(String name, String publicKey){
+    	userList.add(new User(name, publicKey));
+    	listModel.addElement(name);
+    	
+    	System.out.println("User added:"+name);
+    }
+    
+    public void removeUser(String name){
+    	if(partner!=null){
+	    	if(partner.getName().equals(name)){
+	    		partner = null;
+	    		output.setText("");
+	    	}
+    	}
+    	
+    	for (Iterator<User> it = userList.iterator(); it.hasNext();) { 
+            User user = it.next(); 
+            if(user.getName().equals(name))userList.remove(user); 
+        } 
+    	
+    	listModel.removeElement(name);
+    }
+    
+    public void addMsg(String msg, String sender){
+    	  
+    	String clearText = msg;
+    	if(acc.getName().equals(sender)){
+    		partner.addMsg(sender+"<SEPERATOR> "+msg);
+			displayMsg(msg, acc.getName());
+    	}
+    	else {
+	    	try {
+	    		User buddy = null;
+	    		for (Iterator<User> it = userList.iterator(); it.hasNext();) { 
+	                User user = it.next(); 
+	                if(user.getName().equals(sender))buddy = user; 
+	            }
+	    		
+	    		clearText = new EasyCrypt(buddy.getPublicKey(), "RSA").decrypt(clearText);
+	    //		clearText = new EasyCrypt(acc.getPrivateKey(), "RSA").decrypt(clearText);	//<-------------
+				
+				if(partner != null){
+		    		if(partner.getName().equals(sender)){
+		    			displayMsg(clearText, sender);
+		    		}	
+		    	}
+				
+				for (Iterator<User> it = userList.iterator(); it.hasNext();) { 
+		            User user = it.next(); 
+		            if(user.getName().equals(sender))user.addMsg(sender+"<SEPERATOR> "+clearText);
+		        }
+			} catch (Exception e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			} 
+    	}
+    }
+    
+    
+    
+    
+    public class IncomingReader implements Runnable{
+
+        public void run() {
+            String[] data;
+            String stream;
+
+            try {
+                while ((stream = reader.readLine()) != null) {
+
+                    data = stream.split(":");
+
+                    // "ADD USER : name : publicKey" //
+                    if (data[0].equals("ADD USER")&&data[1].equals(acc.getName())==false)addUser(data[1], reParse(data[2]));
+                    
+                    // "REMOVE USER : name" //
+                    else if (data[0].equals("REMOVE USER"))removeUser(data[1]);
+                    
+                    // "ADD MSG : message : sender" //
+                    else if (data[0].equals("ADD MSG"))
+                    	addMsg(reParse(data[1]), data[2]);
+                 
+                }
+           }catch(Exception ex) {
+           }
+        }
+    }
+
+    
+
+
+    //#################################################################
+    //#######################  GUI  ###################################
+    //#################################################################
+
+
+    
+
+    
+    @SuppressWarnings("unchecked")
+    // <editor-fold defaultstate="collapsed" desc="Generated Code">                          
+    private void initComponents() {
+
+        jLabel1 = new javax.swing.JLabel();
+        usernameField = new javax.swing.JTextField();
+        connectButton = new javax.swing.JButton();
+        disconnectButton = new javax.swing.JButton();
+        jLabel2 = new javax.swing.JLabel();
+        jScrollPane1 = new javax.swing.JScrollPane();
+        usersList = new javax.swing.JList(listModel);
+        jScrollPane2 = new javax.swing.JScrollPane();
+        output = new javax.swing.JTextArea();
+        jScrollPane3 = new javax.swing.JScrollPane();
+        input = new javax.swing.JTextArea();
+        sendButton = new javax.swing.JButton();
+
+        setDefaultCloseOperation(javax.swing.WindowConstants.EXIT_ON_CLOSE);
+        
+        usersList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        JScrollPane listScrollPane = new JScrollPane(usersList);
+        usersList.addListSelectionListener(new ListSelectionListener() {
+            public void valueChanged(ListSelectionEvent evt) {
+            	JList list = (JList) evt.getSource();
+                String name = (String)list.getSelectedValue();
+                changePartner(name);
+            }
+          });
+        jLabel1.setText("Benutzername");
+
+        connectButton.setText("Verbinden");
+        connectButton.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                connectButtonActionPerformed(evt);
+            }
+        });
+
+        disconnectButton.setText("Verbindung trennen");
+        disconnectButton.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                disconnectButtonActionPerformed(evt);
+            }
+        });
+
+        jLabel2.setHorizontalAlignment(javax.swing.SwingConstants.CENTER);
+        jLabel2.setText("Verbundene Benutzer");
+
+        
+        jScrollPane1.setViewportView(usersList);
+
+        output.setEditable(false);
+        output.setColumns(20);
+        output.setLineWrap(true);
+        output.setRows(5);
+        jScrollPane2.setViewportView(output);
+
+        input.setColumns(20);
+        input.setRows(5);
+        jScrollPane3.setViewportView(input);
+
+        sendButton.setText("Senden");
+        sendButton.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                sendButtonActionPerformed(evt);
+            }
+        });
+
+        javax.swing.GroupLayout layout = new javax.swing.GroupLayout(getContentPane());
+        getContentPane().setLayout(layout);
+        layout.setHorizontalGroup(
+            layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+            .addGroup(layout.createSequentialGroup()
+                .addContainerGap()
+                .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
+                    .addGroup(layout.createSequentialGroup()
+                        .addComponent(jLabel1)
+                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                        .addComponent(usernameField, javax.swing.GroupLayout.PREFERRED_SIZE, 126, javax.swing.GroupLayout.PREFERRED_SIZE)
+                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                        .addComponent(connectButton)
+                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                        .addComponent(disconnectButton, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
+                    .addComponent(jScrollPane2, javax.swing.GroupLayout.Alignment.TRAILING, javax.swing.GroupLayout.PREFERRED_SIZE, 426, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, layout.createSequentialGroup()
+                        .addComponent(jScrollPane3, javax.swing.GroupLayout.PREFERRED_SIZE, 332, javax.swing.GroupLayout.PREFERRED_SIZE)
+                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
+                        .addComponent(sendButton, javax.swing.GroupLayout.PREFERRED_SIZE, 84, javax.swing.GroupLayout.PREFERRED_SIZE)))
+                .addGap(13, 13, 13)
+                .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                    .addGroup(layout.createSequentialGroup()
+                        .addGap(10, 10, 10)
+                        .addComponent(jScrollPane1, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
+                        .addContainerGap(javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
+                    .addGroup(layout.createSequentialGroup()
+                        .addComponent(jLabel2, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                        .addContainerGap())))
+        );
+        layout.setVerticalGroup(
+            layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+            .addGroup(layout.createSequentialGroup()
+                .addContainerGap()
+                .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                    .addComponent(jLabel1)
+                    .addComponent(usernameField, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addComponent(connectButton)
+                    .addComponent(disconnectButton)
+                    .addComponent(jLabel2))
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                    .addComponent(jScrollPane1)
+                    .addGroup(layout.createSequentialGroup()
+                        .addComponent(jScrollPane2, javax.swing.GroupLayout.PREFERRED_SIZE, 247, javax.swing.GroupLayout.PREFERRED_SIZE)
+                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                        .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
+                            .addComponent(jScrollPane3, javax.swing.GroupLayout.PREFERRED_SIZE, 0, Short.MAX_VALUE)
+                            .addComponent(sendButton, javax.swing.GroupLayout.DEFAULT_SIZE, 85, Short.MAX_VALUE))))
+                .addContainerGap())
+        );
+
+        pack();
+    }// </editor-fold>                        
+
+    private void sendButtonActionPerformed(java.awt.event.ActionEvent evt) {                                           
+        // TODO add your handling code here:
+        String nothing = "";
+        if ((input.getText()).equals(nothing)) {
+            input.setText("");
+            input.requestFocus();
+        } else {
+            try {
+               if(acc!=null)sendMsg(input.getText());
+               else displayMsg("You have to login first", "SYSTEM");
+            } catch (Exception ex) {
+                displayMsg("Message was not send", "SYSTEM");
+            }
+            input.setText("");
+            input.requestFocus();
+        }
+
+        input.setText("");
+        input.requestFocus();
+    }                                          
+
+    private void connectButtonActionPerformed(java.awt.event.ActionEvent evt) { 
+        connect();
+    }                                             
+
+    private void disconnectButtonActionPerformed(java.awt.event.ActionEvent evt) {                                                 
+        disconnect();
+    }                                                
+
+    /**
+     * @param args the command line arguments
+     */
+    public static void main(String args[]) {
+        /* Set the Nimbus look and feel */
+        //<editor-fold defaultstate="collapsed" desc=" Look and feel setting code (optional) ">
+        /* If Nimbus (introduced in Java SE 6) is not available, stay with the default look and feel.
+         * For details see http://download.oracle.com/javase/tutorial/uiswing/lookandfeel/plaf.html 
+         */
+        try {
+            for (javax.swing.UIManager.LookAndFeelInfo info : javax.swing.UIManager.getInstalledLookAndFeels()) {
+                if ("Nimbus".equals(info.getName())) {
+                    javax.swing.UIManager.setLookAndFeel(info.getClassName());
+                    break;
+                }
+            }
+        } catch (ClassNotFoundException ex) {
+            java.util.logging.Logger.getLogger(Chat.class.getName()).log(java.util.logging.Level.SEVERE, null, ex);
+        } catch (InstantiationException ex) {
+            java.util.logging.Logger.getLogger(Chat.class.getName()).log(java.util.logging.Level.SEVERE, null, ex);
+        } catch (IllegalAccessException ex) {
+            java.util.logging.Logger.getLogger(Chat.class.getName()).log(java.util.logging.Level.SEVERE, null, ex);
+        } catch (javax.swing.UnsupportedLookAndFeelException ex) {
+            java.util.logging.Logger.getLogger(Chat.class.getName()).log(java.util.logging.Level.SEVERE, null, ex);
+        }
+        //</editor-fold>
+
+        /* Create and display the form */
+        java.awt.EventQueue.invokeLater(new Runnable() {
+            public void run() {
+                new Chat().setVisible(true);
+            }
+        });
+    }
+
+    // Variables declaration - do not modify      
+    private javax.swing.JButton connectButton;
+    private javax.swing.JButton disconnectButton;
+    private javax.swing.JLabel jLabel1;
+    private javax.swing.JLabel jLabel2;
+    private javax.swing.JScrollPane jScrollPane1;
+    private javax.swing.JScrollPane jScrollPane2;
+    private javax.swing.JScrollPane jScrollPane3;
+    private javax.swing.JButton sendButton;
+    private javax.swing.JTextField usernameField;
+    private javax.swing.JList usersList;
+    // End of variables declaration
+}
