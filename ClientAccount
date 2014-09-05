@@ -1,0 +1,46 @@
+package main;
+
+import java.security.KeyPair;
+import java.security.KeyPairGenerator;
+import java.security.NoSuchAlgorithmException;
+import java.security.PrivateKey;
+import java.security.PublicKey;
+
+public class Account {
+
+	String name;
+	PublicKey publicKey;
+	PrivateKey privateKey;
+	
+	public Account(String name){
+		
+		this.name = name;
+		
+		// Schlüssel generieren			
+		try {
+			// zufaelligen Key erzeugen
+			KeyPairGenerator keygen = KeyPairGenerator.getInstance("RSA");
+			keygen.initialize(2048);
+			KeyPair keyPair = keygen.genKeyPair();
+					 
+			// schluessel lesen
+			this.privateKey = keyPair.getPrivate();
+			this.publicKey = keyPair.getPublic();
+		} catch (NoSuchAlgorithmException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+	}
+	
+	public String getName(){
+		return name;
+	}
+	
+	public PublicKey getPublicKey(){
+		return publicKey;
+	}
+	
+	public PrivateKey getPrivateKey(){
+		return privateKey;
+	}
+}
