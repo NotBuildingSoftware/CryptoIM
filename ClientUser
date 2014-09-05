@@ -1,0 +1,55 @@
+package main;
+
+import java.io.IOException;
+import java.security.KeyFactory;
+import java.security.NoSuchAlgorithmException;
+import java.security.PublicKey;
+import java.security.spec.InvalidKeySpecException;
+import java.security.spec.X509EncodedKeySpec;
+import java.util.ArrayList;
+
+import Decoder.BASE64Decoder;
+
+public class User {
+
+	String name;
+	PublicKey publicKey;
+	ArrayList <String> chat;
+	
+	User(String name, String publicKey){
+		
+		this.name = name;
+		chat = new ArrayList<String>();
+		
+		
+		//publicKey erstellen		
+	    try {
+	    	BASE64Decoder decoder = new BASE64Decoder();
+			byte[] pubB = decoder.decodeBuffer(publicKey);
+			  
+			X509EncodedKeySpec x509KeySpec = new X509EncodedKeySpec(pubB);
+			KeyFactory keyFact = KeyFactory.getInstance("RSA");
+			this.publicKey = keyFact.generatePublic(x509KeySpec);
+		} catch (Exception e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+	    
+	}
+	
+	public void addMsg(String msg){
+		chat.add(msg);
+	}
+	
+	public ArrayList<String> getChat(){
+		return chat;
+	}
+	
+	public String getName(){
+		return name;
+	}
+	
+	public PublicKey getPublicKey(){
+		return publicKey;
+	}
+}
